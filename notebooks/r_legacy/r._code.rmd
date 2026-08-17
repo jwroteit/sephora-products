@@ -1,0 +1,302 @@
+---
+title: "Sephora Product Analysis"
+format: pdf
+editor: visual
+warning: false
+echo: true
+message: false
+---
+
+```{r}
+# dependencies
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(splines)
+library(car)
+library(gtsummary)
+library(pROC)
+library(DBI)
+```
+### Get data
+
+```{r}
+# Connect to DuckDB mart (read-only mode)
+con <- dbConnect(duckdb::duckdb(), dbdir = "../../sephora_products.duckdb", read_only = TRUE)
+
+# Fetch clean data directly from your dbt mart
+data1_clean <- dbGetQuery(con, "
+    SELECT 
+        f.product_id,
+        b.brand_name,
+        f.loves_count,
+        f.rating,
+        f.reviews_count,
+        f.price_usd,
+        f.is_limited_edition,
+        f.is_new,
+        f.is_online_only,
+        f.is_out_of_stock,
+        f.is_sephora_exclusive
+    FROM main.fact_product_metrics f
+")
+
+# Close connection
+dbDisconnect(con, shutdown = TRUE)
+
+
+### Clean data
+
+#exclude products with no reviews or ratings
+
+data1_clean <- data1_clean |>
+  drop_na(rating, reviews_count, price_usd, loves_count, online_only)
+
+# add good review cateogorical
+
+data1_clean <- data1_clean |>
+  mutate(
+    good_rating = factor(
+      case_when(
+        rating >= 4.5 ~ 1,
+        rating < 4.5 ~ 0
+      ),
+      levels = c(0, 1),
+      labels = c("Not Good", "Good")
+    )
+  )
+
+data2_clean <- data1_clean |>
+  filter(
+    reviews_count >= 100 & reviews_count < 10000
+  )
+
+# add log loves and log reviews
+# they are super skewed
+
+data2_clean$log_loves <- log(data2_clean$loves_count + 1)
+data2_clean$log_reviews <- log(data2_clean$reviews_count + 1)
+
+# only get sephora collection
+data2_sc <- data2_clean |>
+  filter(
+    brand_name == "SEPHORA COLLECTION"
+  )
+```
+
+### EDA
+
+```{r, eval=FALSE}
+tbl_summary(
+  data = data2_sc
+  ,label = list(loves_count = "Number of Loves"
+                ,rating = "Mean Rating (1-5)"
+                ,reviews_count = "Number of Reviews"
+                ,price_usd = "Product Price (USD)"
+                ,is_online_only = "Online Only"
+                ,good_rating = "Good Rating (>=4.5)"
+               )
+  ,statistic = list(all_continuous() ~ "{mean} ({sd})"
+                    , all_categorical() ~ "{n} ({p}%)"
+                    )
+  ,include = c("loves_count", "reviews_count", "rating"
+               ,"price_usd", "is_online_only", "good_rating"
+               )
+  )
+```
+
+```{r, eval=FALSE}
+pairs(loves_count ~ reviews_count + rating + price_usd, data = data2_sc)
+```
+
+```{r, eval = FALSE}
+ggplot(data = data2_sc, aes(x = log_reviews, y = log_loves)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    x = "Log Reviews"
+    ,y = "Log Loves"
+    ,title = "Scatterplot of Log Reviews and Log Loves"
+  ) +
+  theme_minimal()
+```
+
+### MLR
+
+```{r}
+lm_model <- lm(loves_count ~ reviews_count + rating + price_usd + is_online_only + is_new
+               , data = data2_sc)
+
+lm2_full <- lm(
+  log_loves ~ rating
+  + log_reviews 
+  + price_usd 
+  + new 
+  + online_only
+  + I(log_reviews^2) 
+  + log_reviews:is_new
+  + log_reviews:rating
+  + log_reviews:is_online_only
+  + log_reviews:price_usd 
+  + rating:price_usd
+  + rating:is_new
+  + rating:is_online_only
+  , data = data2_sc
+)
+
+#summary(lm2_full)
+
+lm_step2 <- step(lm2_full, trace=0) 
+#summary(lm_step2)
+
+vif(lm_step2, type = 'predictor')
+```
+
+```{r}
+AIC(lm_model, lm2_full, lm_step2)
+```
+
+```{r, eval=FALSE}
+# does it meet assumptions
+plot(lm_step2, which = c(1,2))
+```
+
+### Logistic Regression - Good Rating
+
+```{r}
+glm2 <- glm(
+  good_rating ~ log_loves
+  + price_usd
+  + is_online_only
+  + is_new
+  + is_out_of_stock
+  + log_loves:price_usd
+  , data = data2_sc
+  ,family = binomial
+)
+
+#summary(glm2)
+```
+
+```{r}
+glm3 <- glm(
+  good_rating ~ log_loves
+  + price_usd
+  + log_loves:price_usd
+  , data = data2_sc
+  ,family = binomial
+)
+
+#summary(glm3)
+vif(glm3)
+```
+
+```{r}
+glm_spline <- glm(
+  good_rating ~ log_loves +
+                 ns(log_reviews, df = 3) +
+                 price_usd +
+                 is_new +
+                 is_online_only +
+                 is_sephora_exclusive,
+  data = data2_clean,
+  family = binomial
+)
+
+glm_simple <- glm(
+  good_rating ~ log_loves + log_reviews,
+  data = data2_sc,
+  family = binomial
+)
+
+glm_linear <- glm(
+  good_rating ~ log_loves + log_reviews + price_usd + is_new,
+  data = data2_sc,
+  family = binomial
+)
+
+glm_spline2 <- glm(
+  good_rating ~ log_loves +
+                 ns(log_reviews, df = 3) +
+                 price_usd +
+                 is_new +
+                 is_online_only +
+                 is_sephora_exclusive,
+  data = data2_sc,  
+  family = binomial
+)
+
+AIC(glm_simple, glm_linear, glm_spline2, glm2, glm3)
+```
+
+#### Cross-Validation
+
+```{r}
+set.seed(10) # set seed for reproducibility
+n <- nrow(data2_sc)
+
+# get the 70% percentile
+# floor(0.7*n)
+
+# randomly sample 70% of rows for training set
+# this gets the indicies of the randomized 70% training set
+train <- sample(1:n, 105) 
+
+# fit model using training data
+glm3_train <- glm(good_rating ~ log_loves + price_usd + log_loves:price_usd
+                  ,data = data2_sc
+                  ,subset = train
+                  ,family = binomial
+                  )
+```
+
+```{r}
+# subset data frame for testing observations
+sc_test <- data2_sc[-train, ]
+
+# make predictions for probabilities on test set
+probs_test <- predict(glm3_train, newdata = sc_test, type = "response")
+```
+
+```{r}
+preds_test <- rep(0, length(probs_test)) 
+
+# Rule for prediction
+preds_test[probs_test > 0.4] <- 1
+```
+
+```{r}
+tb <- table(prediction = preds_test, actual = sc_test$good_rating)
+addmargins(tb)
+```
+
+```{r}
+# accuracy
+# the percent of correctly classified
+(tb[1,1] + tb[2,2]) / 46
+
+# sensitivity
+# of the ones classified as 1, what was correctly identified as 1
+# at [2,2] in the table divided by all classified as 1
+tb[2,2] / 13
+
+# specificity
+# # of the ones classified as 0, what was correctly identified as 0
+# at [1,1] in the table divided by all classified as 0
+tb[1,1] / 33
+```
+
+```{r}
+# x axis = 1 - specificity # misclassification of 1s
+# y axis = sensitivity
+# would want x = 0 and y = 1 or as close as possible
+library(pROC)
+require(pROC)
+roc_obj <- roc(sc_test$good_rating, probs_test)
+
+plot(roc_obj, print.auc = TRUE, legacy.axes = TRUE)
+```
+
+```{r}
+coords(roc_obj, "best")
+```
