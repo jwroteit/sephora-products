@@ -1,0 +1,6 @@
+sephora_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "/Users/justinmiller/Desktop/duckdb_2/sephora_products.duckdb"

@@ -1,0 +1,13 @@
+# Databases
+*.duckdb
+*.duckdb.wal
+
+# Python
+venv/
+__pycache__/
+*.ipynb_checkpoints/
+
+# dbt
+target/
+dbt_packages/
+logs/

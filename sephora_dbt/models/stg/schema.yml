@@ -1,0 +1,64 @@
+version: 2
+
+models:
+  - name: stg_fct_product_snapshot
+    description: "Staging product fact table with resolved dimensional keys."
+    columns:
+      - name: product_id
+        description: "Primary product key."
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('base_dim_products')
+              field: product_id
+
+      - name: brand_id
+        description: "Foreign key to brand dimension."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('base_dim_brands')
+              field: brand_id
+
+      - name: category_id
+        description: "Foreign key to category dimension."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('base_dim_product_categories')
+              field: category_id
+
+  - name: stg_bridge_product_highlights
+    description: "Bridge table resolving many-to-many product highlight relationships."
+    columns:
+      - name: product_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('base_dim_products')
+              field: product_id
+
+      - name: highlight_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('base_dim_product_highlights')
+              field: highlight_id
+
+  - name: stg_bridge_product_ingredients
+    description: "Bridge table resolving many-to-many product ingredient relationships."
+    columns:
+      - name: product_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('base_dim_products')
+              field: product_id
+
+      - name: ingredient_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('base_dim_product_ingredients')
+              field: ingredient_id

@@ -1,0 +1,59 @@
+version: 2
+
+models:
+  - name: base_dim_products
+    description: "Raw product dimension attributes cleaned from raw catalog."
+    columns:
+      - name: product_id
+        description: "Primary key for products."
+        tests:
+          - unique
+          - not_null
+
+  - name: base_dim_brands
+    description: "Unique brand list with surrogate brand keys."
+    columns:
+      - name: brand_id
+        description: "Surrogate primary key for brand."
+        tests:
+          - unique
+          - not_null
+
+  - name: base_dim_product_categories
+    description: "Hierarchical category dimension with coalesced missing levels."
+    columns:
+      - name: category_id
+        description: "MD5 hash surrogate key generated from primary, secondary, and tertiary categories."
+        tests:
+          - unique
+          - not_null
+      - name: primary_category
+        tests:
+          - not_null
+
+  - name: base_dim_product_highlights
+    description: "Parsed unique marketing highlights and tags."
+    columns:
+      - name: highlight_id
+        description: "Surrogate key generated from highlight name."
+        tests:
+          - unique
+          - not_null
+
+  - name: base_dim_product_ingredients
+    description: "Parsed unique ingredient dimension."
+    columns:
+      - name: ingredient_id
+        description: "Surrogate key generated from ingredient name."
+        tests:
+          - unique
+          - not_null
+
+  - name: base_fct_product_snapshot
+    description: "Raw snapshot metrics per product."
+    columns:
+      - name: product_id
+        description: "Primary key referencing product."
+        tests:
+          - unique
+          - not_null

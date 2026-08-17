@@ -1,0 +1,9 @@
+version: 1
+
+sources:
+  - name: main
+    description: "Raw catalog data imported into DuckDB."
+    schema: main
+    tables:
+      - name: products
+        description: "Raw products source table."
